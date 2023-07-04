@@ -27,6 +27,7 @@ local export = {}
 ---@class Event : Symbol
 ---@field Name string
 ---@field EventType string
+---@field Legacy boolean
 
 ---@class Hook : Event
 
@@ -235,7 +236,13 @@ local function collectTypes(global, results)
                 for _,event in ipairs(source.value) do
                     local eventDoc = event.bindDocs[1]
                     local docTypeNames = eventDoc._typeCache["doc.type.name"]
-                    local eventType = docTypeNames[2][1]
+                    local isLegacyType = #docTypeNames == 1
+                    local eventType
+                    if isLegacyType then
+                        eventType = docTypeNames[1][1]
+                    else
+                        eventType = docTypeNames[2][1]
+                    end
 
                     ---@type Event|Hook
                     local symbol = {

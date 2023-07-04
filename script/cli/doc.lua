@@ -312,6 +312,12 @@ function Exporter.Export(filePath)
     output.Packages = Exporter.Packages
     output.Classes = Exporter.Classes
 
+    -- Remove Symbols table from classes to avoid data duplication
+    -- This will remove them from the exporter too - TODO fix?
+    for _,class in pairs(output.Classes) do
+        class.Symbols = nil
+    end
+
     for _,alias in pairs(Exporter.Aliases) do
         if alias:IsGlobal() then
             output.GlobalAliases[alias.Name] = alias

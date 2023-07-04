@@ -5,7 +5,6 @@ local files    = require 'files'
 local util     = require 'utility'
 local jsonb    = require 'json-beautify'
 local lang     = require 'language'
-local define   = require 'proto.define'
 local config   = require 'config.config'
 local await    = require 'await'
 local vm       = require 'vm'
@@ -15,6 +14,13 @@ local getLabel = require 'core.hover.label'
 local doc2md   = require 'cli.doc2md'
 local progress = require 'progress'
 local fs       = require 'bee.filesystem'
+
+local Utils = require("cli.doc.utils")
+local Package = require("cli.doc.package")
+local Symbol = require("cli.doc.symbol")
+local Class = require("cli.doc.class")
+local Alias = require("cli.doc.alias")
+local Enum = require("cli.doc.enum")
 
 local export = {}
 
@@ -27,233 +33,6 @@ local export = {}
 ---@field Legacy boolean
 
 ---@class Hook : Event
-
-local function Inherit(instance, tbl)
-    setmetatable(instance, {
-        __index = tbl,
-    })
-end
-
----Joins two strings together.
----@param str1 string
----@param str2 string
----@param separator string? Defaults to ` `
----@overload fun(str:string[], separator:string?)
-local function JoinStrings(str1, str2, separator)
-    if type(str1) == "table" then separator = str2 end
-    separator = separator or " "
-    local newString
-
-    if type(str1) == "table" then
-        newString = ""
-
-        for i,str in ipairs(str1) do
-            newString = newString .. str
-
-            if i ~= #str1 then
-                newString = newString .. separator
-            end
-        end
-    else
-        newString = str1 .. separator .. str2
-    end
-
-    return newString
-end
-
----Creates a sublist table.
----@param tbl any[]
----@param len integer
----@return any[]
-local function TableSub(tbl, len)
-    local newtbl = {}
-    for i=1,len,1 do
-        table.insert(newtbl, tbl[i])
-    end
-    return newtbl
-end
-
----------------------------------------------
--- PACKAGE
----------------------------------------------
-
----@class Package
----@field Name string
----@field Classes string[]
-local Package = {}
-
----@param name string
----@return Package
-function Package.Create(name)
-    ---@type Package
-    local instance = {
-        Name = name,
-        Classes = {},
-    }
-    Inherit(instance, Package)
-
-    return instance
-end
-
----@param class Class
-function Package:AddClass(class)
-    table.insert(self.Classes, class.Name)
-end
-
----------------------------------------------
--- SYMBOL
----------------------------------------------
-
----@class Symbol
----@field Type SymbolType
----@field SourceClass string
-local Symbol = {}
-
----@param data Symbol
----@return Symbol
-function Symbol.Create(data)
-    Inherit(data, Symbol)
-    return data
-end
-
----------------------------------------------
--- CLASS
----------------------------------------------
-
----@class Class : Symbol
----@field Name string
----@field PackagePath string[]
----@field Symbols Symbol[]
----@field SymbolsByType table<SymbolType, Symbol[]>
-local Class = {
-    PACKAGE_PATH_PATTERN = "([^_%.]+)",
-}
-Inherit(Class, Symbol)
-
----@param name string
----@return Class
-function Class.Create(name)
-    ---@type Class
-    local instance = {
-        Type = "Class",
-        Name = name,
-        Symbols = {},
-        SymbolsByType = {},
-        PackagePath = {},
-    }
-    Inherit(instance, Class)
-
-    instance:_InitializePackagePath()
-
-    instance.SourceClass = instance:GetRootPackage() -- TODO change to second last?
-
-    return instance
-end
-
----@param symbol Symbol
-function Class:AddSymbol(symbol)
-    table.insert(self.Symbols, symbol)
-
-    self.SymbolsByType[symbol.Type] = self.SymbolsByType[symbol.Type] or {}
-    table.insert(self.SymbolsByType[symbol.Type], symbol)
-end
-
----Returns the classes's symbols, optionally filtered by type.
----@param symbolType SymbolType?
----@return Symbol[]
-function Class:GetSymbols(symbolType)
-    return symbolType == nil and self.Symbols or (self.SymbolsByType[symbolType] or {})
-end
-
----@return string
-function Class:GetRootPackage()
-    return self.PackagePath[1]
-end
-
----@param packageDivider string
-function Class:GetPackage(packageDivider)
-    return JoinStrings(TableSub(self.PackagePath, #self.PackagePath-1), packageDivider)
-end
-
-function Class:_InitializePackagePath()
-    for match in self.Name:gmatch(Class.PACKAGE_PATH_PATTERN) do
-        table.insert(self.PackagePath, match)
-    end
-end
-
----------------------------------------------
--- ALIAS
----------------------------------------------
-
----@class Alias : Symbol
----@field Name string
----@field AliasedTypes string[]
----@field PackagePath string[]
-local Alias = {}
-Inherit(Alias, Symbol)
-
----@param name string
----@param aliasedTypes string[]
----@return Alias
-function Alias.Create(name, aliasedTypes)
-    ---@type Alias
-    local instance = {
-        Type = "Alias",
-        Name = name,
-        AliasedTypes = {},
-        PackagePath = {},
-    }
-    Inherit(instance, Alias)
-
-    Class._InitializePackagePath(instance) -- TODO improve
-    instance.SourceClass = Class.GetRootPackage(instance)
-
-    for _,aliasedType in ipairs(aliasedTypes) do
-        instance:AddType(aliasedType)
-    end
-
-    return instance
-end
-
----@param typeName string
-function Alias:AddType(typeName)
-    table.insert(self.AliasedTypes, typeName)
-end
-
----@return boolean
-function Alias:IsGlobal()
-    return #self.PackagePath == 1
-end
-
----------------------------------------------
--- ENUM
----------------------------------------------
-
----@class Enum : Symbol
----@field Name string
----@field Tuples tuple[]
----@field PackagePath string[]
-local Enum = {}
-Inherit(Enum, Symbol)
-
----@param name string
----@param tuples tuple[]
----@return Enum
-function Enum.Create(name, tuples)
-    ---@type Enum
-    local instance = {
-        Type = "Enum",
-        Name = name,
-        Tuples = tuples,
-        PackagePath = {},
-    }
-    Inherit(instance, Alias)
-
-    Class._InitializePackagePath(instance) -- TODO improve
-    instance.SourceClass = Class.GetRootPackage(instance)
-
-    return instance
-end
 
 ---------------------------------------------
 -- EXPORTER
@@ -285,8 +64,8 @@ function Exporter.AddClass(name)
 
         -- Also register packages
         for i=1,#class.PackagePath-1,1 do
-            local path = TableSub(class.PackagePath, i)
-            path = JoinStrings(path, usesLegacyNaming and "_" or ".")
+            local path = Utils.TableSub(class.PackagePath, i)
+            path = Utils.JoinStrings(path, usesLegacyNaming and "_" or ".")
 
             Exporter.Packages[path] = Exporter.Packages[path] or Package.Create(path)
         end

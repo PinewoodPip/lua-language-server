@@ -21,11 +21,13 @@ local Symbol = require("cli.doc.symbol")
 local Class = require("cli.doc.class")
 local Alias = require("cli.doc.alias")
 local Enum = require("cli.doc.enum")
+local Method = require("cli.doc.method")
 
 local export = {}
 
----@alias SymbolType "Event"|"Hook"|"Alias"|"Class"|"Enum"
+---@alias SymbolType "Event"|"Hook"|"Alias"|"Class"|"Enum"|"Method"
 ---@alias tuple {[1]:string, [2]:any}
+---@alias ScriptContext "Shared"|"Server"|"Client"
 
 ---@class Event : Symbol
 ---@field Name string
@@ -92,6 +94,11 @@ end
 ---@param tuples tuple[]
 function Exporter.AddEnum(name, tuples)
     Exporter.Enums[name] = Enum.Create(name, tuples)
+end
+
+---@param descriptor Method.Descriptor
+function Exporter.AddMethod(descriptor)
+    Exporter.AddSymbol(Method.Create(descriptor))
 end
 
 ---Links classes with their symbols, and packages with their subclasses
@@ -336,22 +343,64 @@ local function collectTypes(global, results)
             field.extends = packObject(source.extends)
             return
         end
-        if source.type == 'setfield'
-        or source.type == 'setmethod' then
+        if (source.type == "setmethod" or source.type == "setfield") and source.node.node.bindDocs then
             ---@cast source parser.object
-            if files.isLibrary(guide.getUri(source)) then
-                return
+            local method = source.method or source.field
+            local class = source.node.node.bindDocs[1].class[1]
+            local sourceFile = guide.getUri(source)
+
+            local comments = {} ---@type string[]
+            local params = {} ---@type Method.Parameter[]
+            local returns = {} ---@type Method.Return[]
+
+            for _,v in ipairs(source.value.bindDocs or {}) do -- bindDocs is not present for sets without any documentation
+                if v.comment and not v.param then
+                    table.insert(comments, v.comment.text:match("^-(.+)$"))
+                end
+                if v.param then
+                    ---@type Method.Parameter
+                    local param = { -- TODO is it always just one node for these?
+                        Name = v.param[1],
+                        Type = v.originalComment.text:match("^-@param [^ ]+ ([^ ]+)"),
+                        Comment = v.comment and v.comment.text, -- doc.tailcomment
+                    }
+                    table.insert(params, param)
+                end
+                if v.returns then
+                    local line = v.originalComment.text
+                    local types = line:match("^-@return ([^-]+)")
+                    local comment = v.comment and v.comment.text
+                    ---@type Method.Return
+                    local returnEntry = {
+                        Types = types,
+                        Comment = comment,
+                    }
+
+                    table.insert(returns, returnEntry)
+                end
             end
-            local field = {}
-            result.fields[#result.fields+1] = field
-            field.name    = (source.field or source.method)[1]
-            field.type    = source.type
-            field.file    = guide.getUri(source)
-            field.start   = source.start
-            field.finish  = source.finish
-            field.desc    = getDesc(source)
-            field.extends = packObject(source.value)
-            return
+
+            -- Check context
+            local context = "Shared" ---@type ScriptContext
+            if sourceFile:match("Client") then
+                context = "Client"
+            elseif sourceFile:match("Server") then
+                context = "Server"
+            end
+
+            ---@type Method.Descriptor
+            local descriptor = {
+                Name = method[1],
+                SourceClass = class,
+                Comments = comments,
+                Parameters = params,
+                Returns = returns,
+                Static = source.type == "setfield",
+                Context = context,
+            }
+            if source.value.type == "function" then -- TODO check this earlier
+                Exporter.AddMethod(descriptor)
+            end
         end
         if source.type == 'tableindex' then
             ---@cast source parser.object

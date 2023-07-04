@@ -33,6 +33,45 @@ local function Inherit(instance, tbl)
     })
 end
 
+---Joins two strings together.
+---@param str1 string
+---@param str2 string
+---@param separator string? Defaults to ` `
+---@overload fun(str:string[], separator:string?)
+local function JoinStrings(str1, str2, separator)
+    if type(str1) == "table" then separator = str2 end
+    separator = separator or " "
+    local newString
+
+    if type(str1) == "table" then
+        newString = ""
+
+        for i,str in ipairs(str1) do
+            newString = newString .. str
+
+            if i ~= #str1 then
+                newString = newString .. separator
+            end
+        end
+    else
+        newString = str1 .. separator .. str2
+    end
+
+    return newString
+end
+
+---Creates a sublist table.
+---@param tbl any[]
+---@param len integer
+---@return any[]
+local function TableSub(tbl, len)
+    local newtbl = {}
+    for i=1,len,1 do
+        table.insert(newtbl, tbl[i])
+    end
+    return newtbl
+end
+
 ---------------------------------------------
 -- PACKAGE
 ---------------------------------------------
@@ -130,6 +169,11 @@ function Class:GetRootPackage()
     return self.PackagePath[1]
 end
 
+---@param packageDivider string
+function Class:GetPackage(packageDivider)
+    return JoinStrings(TableSub(self.PackagePath, #self.PackagePath-1), packageDivider)
+end
+
 function Class:_InitializePackagePath()
     for match in self.Name:gmatch(Class.PACKAGE_PATH_PATTERN) do
         table.insert(self.PackagePath, match)
@@ -203,10 +247,17 @@ end
 function Exporter.AddClass(name)
     if not Exporter.Classes[name] then
         local class = Class.Create(name)
-        local rootPackage = class.PackagePath[1]
+        local usesLegacyNaming = not name:match("%.")
 
-        Exporter.Packages[rootPackage] = Package.Create(rootPackage) -- Also register package
         Exporter.Classes[class.Name] = class
+
+        -- Also register packages
+        for i=1,#class.PackagePath-1,1 do
+            local path = TableSub(class.PackagePath, i)
+            path = JoinStrings(path, usesLegacyNaming and "_" or ".")
+
+            Exporter.Packages[path] = Exporter.Packages[path] or Package.Create(path)
+        end
     end
 end
 
@@ -233,8 +284,11 @@ function Exporter._Link()
         class:AddSymbol(symbol)
     end
     for _,class in pairs(Exporter.Classes) do
-        local package = Exporter.Packages[class:GetRootPackage()]
-        package:AddClass(class)
+        local package = Exporter.Packages[class:GetPackage("_")] or Exporter.Packages[class:GetPackage(".")]
+
+        if package then
+            package:AddClass(class)
+        end
     end
     for _,alias in pairs(Exporter.Aliases) do
         if not alias:IsGlobal() then

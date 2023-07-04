@@ -245,7 +245,7 @@ end
 ---Does nothing if the class was already added.
 ---@param name string
 function Exporter.AddClass(name)
-    if not Exporter.Classes[name] then
+    if not Exporter.Classes[name] and not Exporter.Aliases[name] then
         local class = Class.Create(name)
         local usesLegacyNaming = not name:match("%.")
 

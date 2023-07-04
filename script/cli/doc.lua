@@ -18,11 +18,7 @@ local fs       = require 'bee.filesystem'
 
 local export = {}
 
----@alias SymbolType "Event"|"Hook"
-
----@class Symbol
----@field Type SymbolType
----@field SourceClass string
+---@alias SymbolType "Event"|"Hook"|"Alias"|"Class"
 
 ---@class Event : Symbol
 ---@field Name string
@@ -65,10 +61,26 @@ function Package:AddClass(class)
 end
 
 ---------------------------------------------
+-- SYMBOL
+---------------------------------------------
+
+---@class Symbol
+---@field Type SymbolType
+---@field SourceClass string
+local Symbol = {}
+
+---@param data Symbol
+---@return Symbol
+function Symbol.Create(data)
+    Inherit(data, Symbol)
+    return data
+end
+
+---------------------------------------------
 -- CLASS
 ---------------------------------------------
 
----@class Class
+---@class Class : Symbol
 ---@field Name string
 ---@field PackagePath string[]
 ---@field Symbols Symbol[]
@@ -76,12 +88,14 @@ end
 local Class = {
     PACKAGE_PATH_PATTERN = "([^_%.]+)",
 }
+Inherit(Class, Symbol)
 
 ---@param name string
 ---@return Class
 function Class.Create(name)
     ---@type Class
     local instance = {
+        Type = "Class",
         Name = name,
         Symbols = {},
         SymbolsByType = {},
@@ -89,9 +103,9 @@ function Class.Create(name)
     }
     Inherit(instance, Class)
 
-    for match in name:gmatch(Class.PACKAGE_PATH_PATTERN) do
-        table.insert(instance.PackagePath, match)
-    end
+    instance:_InitializePackagePath()
+
+    instance.SourceClass = instance:GetRootPackage() -- TODO change to second last?
 
     return instance
 end
@@ -116,14 +130,65 @@ function Class:GetRootPackage()
     return self.PackagePath[1]
 end
 
+function Class:_InitializePackagePath()
+    for match in self.Name:gmatch(Class.PACKAGE_PATH_PATTERN) do
+        table.insert(self.PackagePath, match)
+    end
+end
+
+---------------------------------------------
+-- ALIAS
+---------------------------------------------
+
+---@class Alias : Symbol
+---@field Name string
+---@field AliasedTypes string[]
+---@field PackagePath string[]
+local Alias = {}
+Inherit(Alias, Symbol)
+
+---@param name string
+---@param aliasedTypes string[]
+---@return Alias
+function Alias.Create(name, aliasedTypes)
+    ---@type Alias
+    local instance = {
+        Type = "Alias",
+        Name = name,
+        AliasedTypes = {},
+        PackagePath = {},
+    }
+    Inherit(instance, Alias)
+
+    Class._InitializePackagePath(instance) -- TODO improve
+    instance.SourceClass = Class.GetRootPackage(instance)
+
+    for _,aliasedType in ipairs(aliasedTypes) do
+        instance:AddType(aliasedType)
+    end
+
+    return instance
+end
+
+---@param typeName string
+function Alias:AddType(typeName)
+    table.insert(self.AliasedTypes, typeName)
+end
+
+---@return boolean
+function Alias:IsGlobal()
+    return #self.PackagePath == 1
+end
+
 ---------------------------------------------
 -- EXPORTER
 ---------------------------------------------
 
 local Exporter = {
-    Symbols = {}, ---@type Symbol[]
+    Symbols = {}, ---@type Symbol[] Excludes Aliases and Classes
     Classes = {}, ---@type table<string, Class>
     Packages = {}, ---@type table<string, Package>
+    Aliases = {}, ---@type table<string, Alias>
 }
 
 ---Adds a symbol.
@@ -145,6 +210,22 @@ function Exporter.AddClass(name)
     end
 end
 
+---@param name string
+---@param aliasedTypes string[]
+function Exporter.AddAlias(name, aliasedTypes)
+    local alias = Alias.Create(name, aliasedTypes)
+    local existingAlias = Exporter.Aliases[name]
+
+    -- Merge aliases if there are multiple under the same name
+    if existingAlias then
+        for _,aliasedType in ipairs(alias.AliasedTypes) do
+            existingAlias:AddType(aliasedType)
+        end
+    else
+        Exporter.Aliases[name] = alias
+    end
+end
+
 ---Links classes with their symbols, and packages with their subclasses
 function Exporter._Link()
     for _,symbol in ipairs(Exporter.Symbols) do
@@ -155,6 +236,14 @@ function Exporter._Link()
         local package = Exporter.Packages[class:GetRootPackage()]
         package:AddClass(class)
     end
+    for _,alias in pairs(Exporter.Aliases) do
+        if not alias:IsGlobal() then
+            local class = Exporter.Classes[alias.SourceClass]
+            if class then -- TODO
+                class:AddSymbol(alias)
+            end
+        end
+    end
 end
 
 ---@param filePath string
@@ -162,11 +251,18 @@ function Exporter.Export(filePath)
     local output = {
         Packages = {}, ---@type table<string, Package>
         Classes = {}, ---@type table<string, Class>
+        GlobalAliases = {}, ---@type table<string, Alias>
     }
     Exporter._Link()
 
     output.Packages = Exporter.Packages
     output.Classes = Exporter.Classes
+
+    for _,alias in pairs(Exporter.Aliases) do
+        if alias:IsGlobal() then
+            output.GlobalAliases[alias.Name] = alias
+        end
+    end
 
     util.saveFile(filePath, jsonb.beautify(output))
 end
@@ -286,6 +382,25 @@ local function collectTypes(global, results)
             extends = getExtends(set),
         }
         result.desc = result.desc or getDesc(set)
+
+        -- Register aliases
+        if set.type == "doc.alias" then
+            local aliasName = set.alias[1]
+            local types = {
+                set._typeCache["doc.type.string"] or {},
+                set._typeCache["doc.type.name"] or {},
+            }
+            local aliasedTypes = {}
+
+            for _,typeSet in ipairs(types) do
+                for _,type in ipairs(typeSet) do
+                    table.insert(aliasedTypes, type[1])
+                end
+            end
+
+            Exporter.AddAlias(aliasName, aliasedTypes)
+        end
+
         ::CONTINUE::
     end
     if #result.defines == 0 then
@@ -389,7 +504,7 @@ local function collectTypes(global, results)
                         EventType = eventType,
                         Type = fieldName:sub(1, #fieldName - 1)
                     }
-                    Exporter.AddSymbol(symbol)
+                    Exporter.AddSymbol(Symbol.Create(symbol))
                 end
             end
             return

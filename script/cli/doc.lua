@@ -18,6 +18,28 @@ local fs       = require 'bee.filesystem'
 
 local export = {}
 
+---@alias SymbolType "Event"|"Hook"
+
+---@class Symbol
+---@field Type SymbolType
+---@field SourceClass string
+
+---@class Event : Symbol
+---@field Name string
+---@field EventType string
+
+---@class Hook : Event
+
+local Exporter = {
+    Symbols = {}, ---@type Symbol[]
+}
+
+---Adds a symbol.
+---@param symbol Symbol
+function Exporter.AddSymbol(symbol)
+    table.insert(Exporter.Symbols, symbol)
+end
+
 ---@async
 local function packObject(source, mark)
     if type(source) ~= 'table' then
@@ -108,7 +130,7 @@ end
 ---@param global vm.global
 ---@param results table
 local function collectTypes(global, results)
-    if guide.isBasicType(global.name) then
+    if guide.isBasicType(global.name) then -- Ignore built-in types
         return
     end
     local result = {
@@ -118,15 +140,15 @@ local function collectTypes(global, results)
         defines = {},
         fields  = {},
     }
-    for _, set in ipairs(global:getSets(ws.rootUri)) do
+    for _, set in ipairs(global:getSets(ws.rootUri)) do -- For each assignment of the global?
         local uri = guide.getUri(set)
-        if files.isLibrary(uri) then
+        if files.isLibrary(uri) then -- Ignore built-in libraries?
             goto CONTINUE
         end
         result.defines[#result.defines+1] = {
             type    = set.type,
-            file    = guide.getUri(set),
-            start   = set.start,
+            file    = guide.getUri(set), -- File of the symbol
+            start   = set.start, -- Position within file, in characters?
             finish  = set.finish,
             extends = getExtends(set),
         }
@@ -185,7 +207,7 @@ local function collectTypes(global, results)
         end
         if source.type == 'tableindex' then
             ---@cast source parser.object
-            if source.index.type ~= 'string' then
+            if source.index.type ~= 'string' then -- Only consider assignments via string key
                 return
             end
             if files.isLibrary(guide.getUri(source)) then
@@ -200,6 +222,31 @@ local function collectTypes(global, results)
             field.finish  = source.finish
             field.desc    = getDesc(source)
             field.extends = packObject(source.value)
+            return
+        end
+        if source.type == "tablefield" then
+            ---@cast source parser.object
+            local fieldName = source.field[1]
+
+            -- Add Event and Hook symbols (currently essentially the same class)
+            if fieldName == "Events" or fieldName == "Hooks" then
+                local sourceClassName = source.parent.parent.bindDocs[1].class[1]
+
+                for _,event in ipairs(source.value) do
+                    local eventDoc = event.bindDocs[1]
+                    local docTypeNames = eventDoc._typeCache["doc.type.name"]
+                    local eventType = docTypeNames[2][1]
+
+                    ---@type Event|Hook
+                    local symbol = {
+                        SourceClass = sourceClassName,
+                        Name = event.field[1], -- Field assignment
+                        EventType = eventType,
+                        Type = fieldName:sub(1, #fieldName - 1)
+                    }
+                    Exporter.AddSymbol(symbol)
+                end
+            end
             return
         end
     end)
@@ -264,7 +311,7 @@ function export.export(outputPath, callback)
     local i = 0
     for _, global in pairs(globals) do
         if global.cate == 'variable' then
-            collectVars(global, results)
+            -- collectVars(global, results)
         elseif global.cate == 'type' then
             collectTypes(global, results)
         end

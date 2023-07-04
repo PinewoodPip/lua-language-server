@@ -20,6 +20,13 @@ local export = {}
 
 ---@alias SymbolType "Event"|"Hook"
 
+---@class Class
+---@field Name string
+---@field PackagePath string[]
+
+---@class Package
+---@field Name string
+
 ---@class Symbol
 ---@field Type SymbolType
 ---@field SourceClass string
@@ -33,12 +40,32 @@ local export = {}
 
 local Exporter = {
     Symbols = {}, ---@type Symbol[]
+    Classes = {}, ---@type table<string, Class>
+    Packages = {}, ---@type table<string, Package>
+
+    PACKAGE_PATH_PATTERN = "([^_%.]+)",
 }
 
 ---Adds a symbol.
 ---@param symbol Symbol
 function Exporter.AddSymbol(symbol)
     table.insert(Exporter.Symbols, symbol)
+end
+
+---Adds a class.
+---Does nothing if the class was already added.
+---@param class Class
+function Exporter.AddClass(class)
+    if not Exporter.Classes[class.Name] then
+        local rootPackage = class.PackagePath[1]
+        ---@type Package
+        local package = {
+            Name = rootPackage,
+        }
+
+        Exporter.Packages[rootPackage] = package -- Also register package
+        Exporter.Classes[class.Name] = class
+    end
 end
 
 ---@async
@@ -166,6 +193,22 @@ local function collectTypes(global, results)
         return a.start < b.start
     end)
     results[#results+1] = result
+
+    -- Register class
+    if global.cate == "type" then
+        local packagePath = {} ---@type stirng[]
+        for match in global.name:gmatch(Exporter.PACKAGE_PATH_PATTERN) do
+            table.insert(packagePath, match)
+        end
+
+        ---@type Class
+        local class = {
+            Name = global.name,
+            PackagePath = packagePath,
+        }
+        Exporter.AddClass(class)
+    end
+
     ---@async
     ---@diagnostic disable-next-line: not-yieldable
     vm.getClassFields(ws.rootUri, global, vm.ANY, function (source)

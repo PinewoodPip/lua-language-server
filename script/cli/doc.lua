@@ -18,7 +18,8 @@ local fs       = require 'bee.filesystem'
 
 local export = {}
 
----@alias SymbolType "Event"|"Hook"|"Alias"|"Class"
+---@alias SymbolType "Event"|"Hook"|"Alias"|"Class"|"Enum"
+---@alias tuple {[1]:string, [2]:any}
 
 ---@class Event : Symbol
 ---@field Name string
@@ -225,6 +226,36 @@ function Alias:IsGlobal()
 end
 
 ---------------------------------------------
+-- ENUM
+---------------------------------------------
+
+---@class Enum : Symbol
+---@field Name string
+---@field Tuples tuple[]
+---@field PackagePath string[]
+local Enum = {}
+Inherit(Enum, Symbol)
+
+---@param name string
+---@param tuples tuple[]
+---@return Enum
+function Enum.Create(name, tuples)
+    ---@type Enum
+    local instance = {
+        Type = "Enum",
+        Name = name,
+        Tuples = tuples,
+        PackagePath = {},
+    }
+    Inherit(instance, Alias)
+
+    Class._InitializePackagePath(instance) -- TODO improve
+    instance.SourceClass = Class.GetRootPackage(instance)
+
+    return instance
+end
+
+---------------------------------------------
 -- EXPORTER
 ---------------------------------------------
 
@@ -233,6 +264,7 @@ local Exporter = {
     Classes = {}, ---@type table<string, Class>
     Packages = {}, ---@type table<string, Package>
     Aliases = {}, ---@type table<string, Alias>
+    Enums = {}, ---@type table<string, Enum>
 }
 
 ---Adds a symbol.
@@ -277,6 +309,12 @@ function Exporter.AddAlias(name, aliasedTypes)
     end
 end
 
+---@param name string
+---@param tuples tuple[]
+function Exporter.AddEnum(name, tuples)
+    Exporter.Enums[name] = Enum.Create(name, tuples)
+end
+
 ---Links classes with their symbols, and packages with their subclasses
 function Exporter._Link()
     for _,symbol in ipairs(Exporter.Symbols) do
@@ -296,6 +334,12 @@ function Exporter._Link()
             if class then -- TODO
                 class:AddSymbol(alias)
             end
+        end
+    end
+    for _,enum in pairs(Exporter.Enums) do
+        local class = Exporter.Classes[enum.SourceClass]
+        if class then
+            class:AddSymbol(enum)
         end
     end
 end
@@ -459,6 +503,17 @@ local function collectTypes(global, results)
             end
 
             Exporter.AddAlias(aliasName, aliasedTypes)
+        elseif set.type == "doc.enum" then -- Register enums
+            local enumValueNodes = set.bindSource
+            local enumPairs = {} ---@type tuple[]
+            for _,enumValue in ipairs(enumValueNodes) do
+                local tuple = {
+                    enumValue.field and enumValue.field[1] or enumValue.index[1],
+                    enumValue.value[1],
+                }
+                table.insert(enumPairs, tuple)
+            end
+            Exporter.AddEnum(set.enum[1], enumPairs)
         end
 
         ::CONTINUE::

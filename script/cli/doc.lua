@@ -20,13 +20,6 @@ local export = {}
 
 ---@alias SymbolType "Event"|"Hook"
 
----@class Class
----@field Name string
----@field PackagePath string[]
-
----@class Package
----@field Name string
-
 ---@class Symbol
 ---@field Type SymbolType
 ---@field SourceClass string
@@ -38,12 +31,99 @@ local export = {}
 
 ---@class Hook : Event
 
+local function Inherit(instance, tbl)
+    setmetatable(instance, {
+        __index = tbl,
+    })
+end
+
+---------------------------------------------
+-- PACKAGE
+---------------------------------------------
+
+---@class Package
+---@field Name string
+---@field Classes string[]
+local Package = {}
+
+---@param name string
+---@return Package
+function Package.Create(name)
+    ---@type Package
+    local instance = {
+        Name = name,
+        Classes = {},
+    }
+    Inherit(instance, Package)
+
+    return instance
+end
+
+---@param class Class
+function Package:AddClass(class)
+    table.insert(self.Classes, class.Name)
+end
+
+---------------------------------------------
+-- CLASS
+---------------------------------------------
+
+---@class Class
+---@field Name string
+---@field PackagePath string[]
+---@field Symbols Symbol[]
+---@field SymbolsByType table<SymbolType, Symbol[]>
+local Class = {
+    PACKAGE_PATH_PATTERN = "([^_%.]+)",
+}
+
+---@param name string
+---@return Class
+function Class.Create(name)
+    ---@type Class
+    local instance = {
+        Name = name,
+        Symbols = {},
+        SymbolsByType = {},
+        PackagePath = {},
+    }
+    Inherit(instance, Class)
+
+    for match in name:gmatch(Class.PACKAGE_PATH_PATTERN) do
+        table.insert(instance.PackagePath, match)
+    end
+
+    return instance
+end
+
+---@param symbol Symbol
+function Class:AddSymbol(symbol)
+    table.insert(self.Symbols, symbol)
+
+    self.SymbolsByType[symbol.Type] = self.SymbolsByType[symbol.Type] or {}
+    table.insert(self.SymbolsByType[symbol.Type], symbol)
+end
+
+---Returns the classes's symbols, optionally filtered by type.
+---@param symbolType SymbolType?
+---@return Symbol[]
+function Class:GetSymbols(symbolType)
+    return symbolType == nil and self.Symbols or (self.SymbolsByType[symbolType] or {})
+end
+
+---@return string
+function Class:GetRootPackage()
+    return self.PackagePath[1]
+end
+
+---------------------------------------------
+-- EXPORTER
+---------------------------------------------
+
 local Exporter = {
     Symbols = {}, ---@type Symbol[]
     Classes = {}, ---@type table<string, Class>
     Packages = {}, ---@type table<string, Package>
-
-    PACKAGE_PATH_PATTERN = "([^_%.]+)",
 }
 
 ---Adds a symbol.
@@ -54,19 +134,44 @@ end
 
 ---Adds a class.
 ---Does nothing if the class was already added.
----@param class Class
-function Exporter.AddClass(class)
-    if not Exporter.Classes[class.Name] then
+---@param name string
+function Exporter.AddClass(name)
+    if not Exporter.Classes[name] then
+        local class = Class.Create(name)
         local rootPackage = class.PackagePath[1]
-        ---@type Package
-        local package = {
-            Name = rootPackage,
-        }
 
-        Exporter.Packages[rootPackage] = package -- Also register package
+        Exporter.Packages[rootPackage] = Package.Create(rootPackage) -- Also register package
         Exporter.Classes[class.Name] = class
     end
 end
+
+---Links classes with their symbols, and packages with their subclasses
+function Exporter._Link()
+    for _,symbol in ipairs(Exporter.Symbols) do
+        local class = Exporter.Classes[symbol.SourceClass]
+        class:AddSymbol(symbol)
+    end
+    for _,class in pairs(Exporter.Classes) do
+        local package = Exporter.Packages[class:GetRootPackage()]
+        package:AddClass(class)
+    end
+end
+
+---@param filePath string
+function Exporter.Export(filePath)
+    local output = {
+        Packages = {}, ---@type table<string, Package>
+        Classes = {}, ---@type table<string, Class>
+    }
+    Exporter._Link()
+
+    output.Packages = Exporter.Packages
+    output.Classes = Exporter.Classes
+
+    util.saveFile(filePath, jsonb.beautify(output))
+end
+
+---------------------------------------------
 
 ---@async
 local function packObject(source, mark)
@@ -196,17 +301,7 @@ local function collectTypes(global, results)
 
     -- Register class
     if global.cate == "type" then
-        local packagePath = {} ---@type stirng[]
-        for match in global.name:gmatch(Exporter.PACKAGE_PATH_PATTERN) do
-            table.insert(packagePath, match)
-        end
-
-        ---@type Class
-        local class = {
-            Name = global.name,
-            PackagePath = packagePath,
-        }
-        Exporter.AddClass(class)
+        Exporter.AddClass(global.name)
     end
 
     ---@async
@@ -378,6 +473,10 @@ function export.export(outputPath, callback)
     util.saveFile(docPath, jsonb.beautify(results))
 
     local mdPath = doc2md.buildMD(outputPath)
+
+    outputPath = outputPath .. "/output.json"
+    Exporter.Export(outputPath)
+
     return docPath, mdPath
 end
 

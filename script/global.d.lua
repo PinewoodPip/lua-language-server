@@ -52,6 +52,10 @@ CHECK = ''
 ---@type string
 DOC = ''
 
+-- Path of markdown docs for use with `--doc`
+---@type string
+DOCSOUTPUT = ''
+
 ---@type string | '"Error"' | '"Warning"' | '"Information"' | '"Hint"'
 CHECKLEVEL = 'Warning'
 

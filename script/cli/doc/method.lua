@@ -9,6 +9,7 @@ local Symbol = require("cli.doc.symbol")
 ---@field Returns Method.Return[]
 ---@field Static boolean
 ---@field Context ScriptContext
+---@field Visibility parser.visibleType
 
 ---@class Method.Parameter
 ---@field Name string

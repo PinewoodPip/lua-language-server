@@ -23,6 +23,8 @@ local Alias = require("cli.doc.alias")
 local Enum = require("cli.doc.enum")
 local Method = require("cli.doc.method")
 
+local docgen = require("cli.update-docs")
+
 local export = {}
 
 ---@alias SymbolType "Event"|"Hook"|"Alias"|"Class"|"Enum"|"Method"
@@ -40,12 +42,16 @@ local export = {}
 -- EXPORTER
 ---------------------------------------------
 
+---@class Exporter
 local Exporter = {
     Symbols = {}, ---@type Symbol[] Excludes Aliases and Classes
     Classes = {}, ---@type table<string, Class>
     Packages = {}, ---@type table<string, Package>
     Aliases = {}, ---@type table<string, Alias>
     Enums = {}, ---@type table<string, Enum>
+    _ClassFields = {}, ---@type table<string, Class.Field[]>
+    _ClassComments = {}, ---@type table<string, string[]>
+    _VisitedObjects = {}, ---@type table<parser.object, true>
 }
 
 ---Adds a symbol.
@@ -72,6 +78,22 @@ function Exporter.AddClass(name)
             Exporter.Packages[path] = Exporter.Packages[path] or Package.Create(path)
         end
     end
+end
+
+---@param className string
+---@param field Class.Field
+function Exporter.AddClassField(className, field)
+    Exporter._ClassFields[className] = Exporter._ClassFields[className] or {}
+    local fields = Exporter._ClassFields[className]
+    table.insert(fields, field)
+end
+
+---@param className string
+---@param comment string
+function Exporter.AddClassComment(className, comment)
+    Exporter._ClassComments[className] = Exporter._ClassComments[className] or {}
+    local comments = Exporter._ClassComments[className]
+    table.insert(comments, comment)
 end
 
 ---@param name string
@@ -112,6 +134,18 @@ function Exporter._Link()
 
         if package then
             package:AddClass(class)
+        end
+    end
+    for className,fields in pairs(Exporter._ClassFields) do
+        local class = Exporter.Classes[className]
+        for _,field in ipairs(fields) do
+            class:AddField(field)
+        end
+    end
+    for className,comments in pairs(Exporter._ClassComments) do
+        local class = Exporter.Classes[className]
+        for _,field in ipairs(comments) do
+            class:AddComment(field)
         end
     end
     for _,alias in pairs(Exporter.Aliases) do
@@ -155,6 +189,7 @@ function Exporter.Export(filePath)
     end
 
     util.saveFile(filePath, jsonb.beautify(output))
+    docgen.Update(Exporter)
 end
 
 ---------------------------------------------
@@ -323,37 +358,60 @@ local function collectTypes(global, results)
     ---@async
     ---@diagnostic disable-next-line: not-yieldable
     vm.getClassFields(ws.rootUri, global, vm.ANY, function (source)
+        -- Add class comments
+        if source.type == "doc.class" and source.bindComments then
+            for _,commentNode in ipairs(source.bindComments) do
+                Exporter.AddClassComment(source.class[1], commentNode.comment.text)
+            end
+        end
         if source.type == 'doc.field' then
             ---@cast source parser.object
-            if files.isLibrary(guide.getUri(source)) then
-                return
-            end
-            local field = {}
-            result.fields[#result.fields+1] = field
+            local class = source.class.class[1]
+            local fieldName
             if source.field.type == 'doc.field.name' then
-                field.name = source.field[1]
-            else
-                field.name = ('[%s]'):format(vm.getInfer(source.field):view(ws.rootUri))
+                fieldName = source.field[1]
+            else -- Non-string index
+                fieldName = ('[%s]'):format(vm.getInfer(source.field):view(ws.rootUri))
             end
-            field.type    = source.type
-            field.file    = guide.getUri(source)
-            field.start   = source.start
-            field.finish  = source.finish
-            field.desc    = getDesc(source)
-            field.extends = packObject(source.extends)
+
+            ---@type Class.Field
+            local field = {
+                Name = fieldName,
+                Type = source.field.parent.originalComment.text:match("-@field [^ ]+ ([^ ]+)"),
+                Comment = source.field.parent.originalComment.text:match("-@field [^ ]+ [^ ]+ (.+)"),
+                Visibility = Utils.GetVisibilityFromName(fieldName),
+            }
+            Exporter.AddClassField(class, field)
             return
         end
-        if (source.type == "setmethod" or source.type == "setfield") and source.node.node.bindDocs then
+        if (source.type == "setmethod" or source.type == "setfield") and source.parent.docs and source.value.type == "function" then
             ---@cast source parser.object
             local method = source.method or source.field
-            local class = source.node.node.bindDocs[1].class[1]
+            local methodName = method[1]
+            local class = nil
+            if source.node.type == "getglobal" then
+                local globalName = source.node[1]
+                for _,v in ipairs(source.parent.docs) do
+                    if v.class and v.bindSource and v.bindSource[1] == globalName then
+                        class = v.class[1]
+                        break
+                    end
+                end
+            else
+                class = source.node.node.bindDocs[1].class[1]
+            end
+            if not class then return end -- TODO check if there are edgecases?
             local sourceFile = guide.getUri(source)
 
             local comments = {} ---@type string[]
             local params = {} ---@type Method.Parameter[]
             local returns = {} ---@type Method.Return[]
+            local visibility = Utils.GetVisibilityFromName(methodName)
 
             for _,v in ipairs(source.value.bindDocs or {}) do -- bindDocs is not present for sets without any documentation
+                if v.visible then -- TODO check if this is correct for explicit visibility tags
+                    visibility = v.visible
+                end
                 if v.comment and not v.param then
                     table.insert(comments, v.comment.text:match("^-(.+)$"))
                 end
@@ -390,15 +448,17 @@ local function collectTypes(global, results)
 
             ---@type Method.Descriptor
             local descriptor = {
-                Name = method[1],
+                Name = methodName,
                 SourceClass = class,
                 Comments = comments,
                 Parameters = params,
                 Returns = returns,
                 Static = source.type == "setfield",
                 Context = context,
+                Visibility = visibility,
             }
-            if source.value.type == "function" then -- TODO check this earlier
+            if not Exporter._VisitedObjects[source] then
+                Exporter._VisitedObjects[source] = true
                 Exporter.AddMethod(descriptor)
             end
         end
@@ -514,7 +574,7 @@ function export.export(outputPath, callback)
     local i = 0
     for _, global in pairs(globals) do
         if global.cate == 'variable' then
-            -- collectVars(global, results)
+            collectVars(global, results)
         elseif global.cate == 'type' then
             collectTypes(global, results)
         end

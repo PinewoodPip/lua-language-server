@@ -1,11 +1,19 @@
 local Utils = require("cli.doc.utils")
 local Symbol = require("cli.doc.symbol")
 
+---@class Class.Field
+---@field Name string
+---@field Type string
+---@field Comment string
+---@field Visibility parser.visibleType
+
 ---@class Class : Symbol
 ---@field Name string
+---@field Comments string[]
 ---@field PackagePath string[]
 ---@field Symbols Symbol[]
 ---@field SymbolsByType table<SymbolType, Symbol[]>
+---@field ExplicitFields Class.Field[]
 local Class = {
     PACKAGE_PATH_PATTERN = "([^_%.]+)",
 }
@@ -18,9 +26,11 @@ function Class.Create(name)
     local instance = {
         Type = "Class",
         Name = name,
+        Comments = {},
         Symbols = {},
         SymbolsByType = {},
         PackagePath = {},
+        ExplicitFields = {},
     }
     Utils.Inherit(instance, Class)
 
@@ -37,6 +47,16 @@ function Class:AddSymbol(symbol)
 
     self.SymbolsByType[symbol.Type] = self.SymbolsByType[symbol.Type] or {}
     table.insert(self.SymbolsByType[symbol.Type], symbol)
+end
+
+---@param field Class.Field
+function Class:AddField(field)
+    table.insert(self.ExplicitFields, field)
+end
+
+---@param comment string
+function Class:AddComment(comment)
+    table.insert(self.Comments, comment)
 end
 
 ---Returns the classes's symbols, optionally filtered by type.

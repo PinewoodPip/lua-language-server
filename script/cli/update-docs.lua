@@ -143,7 +143,7 @@ function Docs.Update(data)
             end
 
             content = content:gsub(
-                "<doc " .. docType .. "=\"" .. symbolName .. "\">(.+)</doc>",
+                "<doc " .. docType .. "=\"" .. symbolName .. "\">(.-)</doc>",
                 "<doc " .. docType .. "=\"" .. symbolName .. "\">" .. "\n\n" .. tostring(docs) .. "\n" .. "</doc>"
             )
         end

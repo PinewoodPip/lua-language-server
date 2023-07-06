@@ -17,13 +17,17 @@ function Docs.GetClassDocs(className)
     local class = Docs.Exporter.Classes[className]
     local writer = Writer.Create()
 
+    writer:AddLine(string.format("# %s Class", className))
+
     -- TODO write class comments?
 
-    -- Write events
-    writer:AddLine("## Events and Hooks")
+    -- Write events, if any
     local events = Utils.TableConcat(class.SymbolsByType["Event"] or {}, class.SymbolsByType["Hook"] or {}) ---@type (Event|Hook)[]
-    for _,listenable in ipairs(events) do
-        writer:Merge(Docs.GetEventDocs(listenable))
+    if #events > 0 then
+        writer:AddLine("## Events and Hooks")
+        for _,listenable in ipairs(events) do
+            writer:Merge(Docs.GetEventDocs(listenable))
+        end
     end
 
     -- Write methods
@@ -140,7 +144,7 @@ function Docs.Update(data)
 
             content = content:gsub(
                 "<doc " .. docType .. "=\"" .. symbolName .. "\">(.+)</doc>",
-                "<doc " .. docType .. "=\"" .. symbolName .. "\">" .. "\n" .. tostring(docs) .. "\n" .. "</doc>"
+                "<doc " .. docType .. "=\"" .. symbolName .. "\">" .. "\n\n" .. tostring(docs) .. "\n" .. "</doc>"
             )
         end
 

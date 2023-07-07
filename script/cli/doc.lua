@@ -381,7 +381,10 @@ local function collectTypes(global, results)
                 Comment = source.field.parent.originalComment.text:match("-@field [^ ]+ [^ ]+ (.+)"),
                 Visibility = Utils.GetVisibilityFromName(fieldName),
             }
-            Exporter.AddClassField(class, field)
+            if not Exporter._VisitedObjects[source] then
+                Exporter.AddClassField(class, field)
+                Exporter._VisitedObjects[source] = true
+            end
             return
         end
         if (source.type == "setmethod" or source.type == "setfield") and source.parent.docs and source.value.type == "function" then

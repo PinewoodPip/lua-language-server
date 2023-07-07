@@ -45,6 +45,24 @@ function Docs.GetClassDocs(className)
     return writer
 end
 
+---@param className Class|string
+---@param writeHeader boolean?
+---@return DocGenerator.Writer
+function Docs.GetClassFieldDocs(className, writeHeader)
+    local writer = Writer.Create()
+    local class = type(className) == "table" and className or Docs.Exporter.Classes[className]
+
+    if writeHeader then
+        writer:AddLine(string.format("# %s Class", className))
+    end
+
+    for _,field in ipairs(class.ExplicitFields) do
+        Docs.WriteField(writer, field)
+    end
+
+    return writer
+end
+
 ---@param event Event|Hook
 ---@return DocGenerator.Writer
 function Docs.GetEventDocs(event)
@@ -61,14 +79,7 @@ function Docs.GetEventDocs(event)
     end
 
     -- Write fields
-    for _,field in ipairs(class.ExplicitFields) do
-        writer:AddLine(Paragraph(Utils.JoinStrings({
-            Color(Bold(Italics("@field")), Docs.PARAMETER_COLOR),
-            Bold(field.Name),
-            Code(field.Type),
-            field.Comment
-        }), {["margin-bottom"] = "0px"}))
-    end
+    writer:Merge(Docs.GetClassFieldDocs(class))
 
     return writer
 end
@@ -145,6 +156,8 @@ function Docs.Update(data)
             local docs ---@type DocGenerator.Writer
             if docType == "class" then -- TODO add more tags
                 docs = Docs.GetClassDocs(symbolName)
+            elseif docType == "fields" then
+                docs = Docs.GetClassFieldDocs(symbolName, true)
             end
 
             content = content:gsub(
@@ -159,6 +172,17 @@ function Docs.Update(data)
         outputFile:close()
         ---@diagnostic enable: need-check-nil
     end
+end
+
+---@param writer DocGenerator.Writer
+---@param field Class.Field
+function Docs.WriteField(writer, field)
+    writer:AddLine(Paragraph(Utils.JoinStrings({
+        Color(Bold(Italics("@field")), Docs.PARAMETER_COLOR),
+        Bold(field.Name),
+        Code(field.Type),
+        field.Comment
+    }), {["margin-bottom"] = "0px"}))
 end
 
 return Docs

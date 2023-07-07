@@ -37,7 +37,7 @@ function Docs.GetClassDocs(className)
         return a.Name < b.Name
     end)
     for _,method in ipairs(methods) do
-        if method.Visibility ~= 'private' then
+        if method.Visibility ~= 'private' and not method:IsDeprecated() then
             writer:Merge(Docs.GetMethodDocs(method))
         end
     end
@@ -103,7 +103,12 @@ function Docs.GetMethodDocs(method)
     if #method.Returns > 0 then
         returnLabel = string.format("\n   -> %s%s", Utils.JoinStrings(returns, ", "), returnComment)
     end
-    writer:AddMultilineCode(string.format("function %s%s%s(%s)%s%s", method.SourceClass, method.Static and "." or ":", method.Name, Utils.JoinStrings(params, ", "), signatureComment, returnLabel))
+    local signature = {}
+    if method.Visibility ~= 'public' then -- Write visibility tag
+        table.insert(signature, "---@" .. method.Visibility)
+    end
+    table.insert(signature, string.format("function %s%s%s(%s)%s%s", method.SourceClass, method.Static and "." or ":", method.Name, Utils.JoinStrings(params, ", "), signatureComment, returnLabel))
+    writer:AddMultilineCode(Utils.JoinStrings(signature, "\n"))
 
     -- Write comments
     for _,comment in ipairs(method.Comments) do

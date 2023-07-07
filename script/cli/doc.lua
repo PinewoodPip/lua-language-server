@@ -407,6 +407,7 @@ local function collectTypes(global, results)
             local params = {} ---@type Method.Parameter[]
             local returns = {} ---@type Method.Return[]
             local visibility = Utils.GetVisibilityFromName(methodName)
+            local deprecationComment = nil
 
             for _,v in ipairs(source.value.bindDocs or {}) do -- bindDocs is not present for sets without any documentation
                 if v.visible then -- TODO check if this is correct for explicit visibility tags
@@ -437,6 +438,11 @@ local function collectTypes(global, results)
                     table.insert(returns, returnEntry)
                 end
             end
+            for _,v in ipairs(source.bindDocs or {}) do
+                if v.type == "doc.deprecated" then
+                    deprecationComment = v.comment and v.comment.text or ""
+                end
+            end
 
             -- Check context
             local context = "Shared" ---@type ScriptContext
@@ -456,6 +462,7 @@ local function collectTypes(global, results)
                 Static = source.type == "setfield",
                 Context = context,
                 Visibility = visibility,
+                DeprecationComment = deprecationComment,
             }
             if not Exporter._VisitedObjects[source] then
                 Exporter._VisitedObjects[source] = true

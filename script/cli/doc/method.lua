@@ -10,6 +10,7 @@ local Symbol = require("cli.doc.symbol")
 ---@field Static boolean
 ---@field Context ScriptContext
 ---@field Visibility parser.visibleType
+---@field DeprecationComment string? If present, the method has a @deprecated tag. The comment may be an empty string.
 
 ---@class Method.Parameter
 ---@field Name string
@@ -38,6 +39,11 @@ function Method.Create(descriptor)
     end
 
     return instance
+end
+
+---@return boolean
+function Method:IsDeprecated()
+    return self.DeprecationComment ~= nil
 end
 
 return Method

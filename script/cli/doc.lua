@@ -418,9 +418,13 @@ local function collectTypes(global, results)
                 end
                 if v.param then
                     ---@type Method.Parameter
+                    local paramType
+                    local originalComment = v.originalComment.text
+                    paramType = originalComment:match("^-@param [^ ]+ (fun%(.+%))") or originalComment:match("^-@param [^ ]+ ([^ ]+)")
+
                     local param = { -- TODO is it always just one node for these?
                         Name = v.param[1],
-                        Type = v.originalComment.text:match("^-@param [^ ]+ ([^ ]+)"),
+                        Type = paramType,
                         Comment = v.comment and v.comment.text, -- doc.tailcomment
                     }
                     table.insert(params, param)

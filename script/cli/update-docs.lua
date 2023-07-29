@@ -13,13 +13,25 @@ local Docs = {
 
 ---@param className string
 ---@return DocGenerator.Writer
-function Docs.GetClassDocs(className)
+function Docs.GetClassDocs(className, includeFields)
     local class = Docs.Exporter.Classes[className]
     local writer = Writer.Create()
 
     writer:AddLine(string.format("# %s Class", className))
 
-    -- TODO write class comments?
+    -- Write extends/inheritance
+    if class.Extends[1] then
+        writer:AddLine(string.format("Inherits from %s.", Code(Utils.JoinStrings(class.Extends, ", "))))
+    end
+
+    -- Write class comments
+    for _,comment in ipairs(class.Comments) do
+        writer:AddLine(comment)
+    end
+
+    if includeFields then
+        writer:Merge(Docs.GetClassFieldDocs(className))
+    end
 
     -- Write events, if any
     local events = Utils.TableConcat(class.SymbolsByType["Event"] or {}, class.SymbolsByType["Hook"] or {}) ---@type (Event|Hook)[]
@@ -158,6 +170,8 @@ function Docs.Update(data)
                 docs = Docs.GetClassDocs(symbolName)
             elseif docType == "fields" then
                 docs = Docs.GetClassFieldDocs(symbolName, true)
+            elseif docType == "classWithFields" then -- TODO rename
+                docs = Docs.GetClassDocs(symbolName, true)
             end
 
             content = content:gsub(

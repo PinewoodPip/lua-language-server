@@ -14,6 +14,7 @@ local Symbol = require("cli.doc.symbol")
 ---@field Symbols Symbol[]
 ---@field SymbolsByType table<SymbolType, Symbol[]>
 ---@field ExplicitFields Class.Field[]
+---@field Extends string[]
 local Class = {
     PACKAGE_PATH_PATTERN = "([^_%.]+)",
 }
@@ -31,6 +32,7 @@ function Class.Create(name)
         SymbolsByType = {},
         PackagePath = {},
         ExplicitFields = {},
+        Extends = {},
     }
     Utils.Inherit(instance, Class)
 
@@ -57,6 +59,14 @@ end
 ---@param comment string
 function Class:AddComment(comment)
     table.insert(self.Comments, comment)
+end
+
+---Adds an extension to the class (inheritance).
+---@param extendName string
+function Class:AddExtend(extendName)
+    if not Utils.ContainsValue(self.Extends, extendName) then
+        table.insert(self.Extends, extendName)
+    end
 end
 
 ---Returns the classes's symbols, optionally filtered by type.

@@ -103,4 +103,16 @@ function Utils.GetVisibilityFromName(fieldName)
     return visibility
 end
 
+---Returns whether a table contains a value.
+---@param tbl table
+---@param value any
+function Utils.ContainsValue(tbl, value)
+    for _,v in pairs(tbl) do
+        if v == value then
+            return true
+        end
+    end
+    return false
+end
+
 return Utils

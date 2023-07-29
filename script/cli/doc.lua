@@ -63,9 +63,11 @@ end
 ---Adds a class.
 ---Does nothing if the class was already added.
 ---@param name string
+---@return Class
 function Exporter.AddClass(name)
-    if not Exporter.Classes[name] and not Exporter.Aliases[name] then
-        local class = Class.Create(name)
+    local class = Exporter.Classes[name]
+    if not class and not Exporter.Aliases[name] then
+        class = Class.Create(name)
         local usesLegacyNaming = not name:match("%.")
 
         Exporter.Classes[class.Name] = class
@@ -78,6 +80,7 @@ function Exporter.AddClass(name)
             Exporter.Packages[path] = Exporter.Packages[path] or Package.Create(path)
         end
     end
+    return class
 end
 
 ---@param className string
@@ -94,6 +97,14 @@ function Exporter.AddClassComment(className, comment)
     Exporter._ClassComments[className] = Exporter._ClassComments[className] or {}
     local comments = Exporter._ClassComments[className]
     table.insert(comments, comment)
+end
+
+---Adds a class extend.
+---@param className string
+---@param extendName string
+function Exporter.AddClassExtend(className, extendName)
+    local class = Exporter.Classes[className] or Exporter.AddClass(className)
+    class:AddExtend(extendName)
 end
 
 ---@param name string
@@ -308,8 +319,25 @@ local function collectTypes(global, results)
         }
         result.desc = result.desc or getDesc(set)
 
-        -- Register aliases
-        if set.type == "doc.alias" then
+        if set.type == "doc.class" then
+            local className = set.class[1]
+
+            -- Add class comments
+            for _,commentNode in ipairs(set.bindComments) do -- TODO merge lines if they start with lowercase?
+                Exporter.AddClassComment(className, commentNode.comment.text:match("^-(.+)"))
+            end
+
+            -- Add extends
+            for _,extend in ipairs(set.extends or {}) do
+                if extend.type == "doc.extends.name" then
+                    Exporter.AddClassExtend(className, extend[1])
+                elseif extend.type == "doc.type.table" then
+                    -- Unsupported. The types of the fields appear to be in extends.
+                else
+                    warn("Unsupported extend type", extend.type)
+                end
+            end
+        elseif set.type == "doc.alias" then -- Register aliases
             local aliasName = set.alias[1]
             local types = {
                 set._typeCache["doc.type.string"] or {},
@@ -358,12 +386,6 @@ local function collectTypes(global, results)
     ---@async
     ---@diagnostic disable-next-line: not-yieldable
     vm.getClassFields(ws.rootUri, global, vm.ANY, function (source)
-        -- Add class comments
-        if source.type == "doc.class" and source.bindComments then
-            for _,commentNode in ipairs(source.bindComments) do
-                Exporter.AddClassComment(source.class[1], commentNode.comment.text)
-            end
-        end
         if source.type == 'doc.field' then
             ---@cast source parser.object
             local class = source.class.class[1]

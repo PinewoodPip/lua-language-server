@@ -434,8 +434,17 @@ local function collectTypes(global, results)
             local visibility = Utils.GetVisibilityFromName(methodName)
             local deprecationComment = nil
 
+            -- Check for explicit visibility tags
+            for _,v in ipairs(source.bindDocs or {}) do
+                if v.type == "doc.private" then
+                    visibility = "private"
+                elseif v.type == "doc.protected" then
+                    visibility = "protected"
+                end -- TODO are there others?
+            end
+
             for _,v in ipairs(source.value.bindDocs or {}) do -- bindDocs is not present for sets without any documentation
-                if v.visible then -- TODO check if this is correct for explicit visibility tags
+                if v.visible then
                     visibility = v.visible
                 end
                 if v.comment and not v.param then

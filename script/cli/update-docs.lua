@@ -86,8 +86,12 @@ function Docs.GetEventDocs(event)
     writer:AddLine(header)
 
     -- Write comments
-    for _,comment in ipairs(class.Comments) do
-        writer:AddLine(comment)
+    if event.ShortComment then -- Takes priority over class comments; this is to remove the comment from events that use EmptyEvent.
+        writer:AddLine(event.ShortComment)
+    else
+        for _,comment in ipairs(class.Comments) do
+            writer:AddLine(comment)
+        end
     end
 
     -- Write fields

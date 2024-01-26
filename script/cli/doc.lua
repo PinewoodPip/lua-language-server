@@ -35,6 +35,7 @@ local export = {}
 ---@field Name string
 ---@field EventType string
 ---@field Legacy boolean
+---@field ShortComment string?
 
 ---@class Hook : Event
 
@@ -550,7 +551,8 @@ local function collectTypes(global, results)
                         SourceClass = sourceClassName,
                         Name = event.field[1], -- Field assignment
                         EventType = eventType,
-                        Type = fieldName:sub(1, #fieldName - 1)
+                        Type = fieldName:sub(1, #fieldName - 1),
+                        ShortComment = eventDoc.comment and eventDoc.comment.text or nil,
                     }
                     Exporter.AddSymbol(Symbol.Create(symbol))
                 end

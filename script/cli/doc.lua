@@ -108,6 +108,11 @@ function Exporter.AddClassExtend(className, extendName)
     class:AddExtend(extendName)
 end
 
+---@param symbol Event|Hook
+function Exporter.AddListenable(symbol)
+    Exporter.AddSymbol(symbol)
+end
+
 ---@param name string
 ---@param aliasedTypes string[]
 function Exporter.AddAlias(name, aliasedTypes)
@@ -554,7 +559,10 @@ local function collectTypes(global, results)
                         Type = fieldName:sub(1, #fieldName - 1),
                         ShortComment = eventDoc.comment and eventDoc.comment.text or nil,
                     }
-                    Exporter.AddSymbol(Symbol.Create(symbol))
+                    if not Exporter._VisitedObjects[event] then
+                        Exporter._VisitedObjects[event] = true
+                        Exporter.AddListenable(Symbol.Create(symbol))
+                    end
                 end
             end
             return
